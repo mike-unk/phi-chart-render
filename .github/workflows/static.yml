@@ -1,42 +1,77 @@
-# Simple workflow for deploying static content to GitHub Pages
-name: Deploy static content to Pages
+name: Build test page to GitHub Pages
 
 on:
-  # Runs on pushes targeting the default branch
   push:
-    branches: ["master"]
-
-  # Allows you to run this workflow manually from the Actions tab
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
   workflow_dispatch:
+    inputs:
+      tags:
+        description: 'Run workflow manually'
 
-# Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
 permissions:
   contents: read
   pages: write
   id-token: write
 
-# Allow one concurrent deployment
-concurrency:
-  group: "pages"
-  cancel-in-progress: true
-
 jobs:
-  # Single deploy job since we're just deploying
   deploy:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+      
     runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        node-version: [16.x]
+    
     steps:
       - name: Checkout
         uses: actions/checkout@v3
+      
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ matrix.node-version }}
+      
       - name: Setup Pages
         uses: actions/configure-pages@v2
+      
+      - name: Replace current git hash to HTML
+        run: |
+          sed -i 's/{{CURRENT_HASH}}/${{ github.sha }}/g' ./public/index.html
+          sed -i 's/{{CURRENT_HASH}}/${{ github.sha }}/g' ./public/sw.js
+      
+      - name: Build webpack 
+        run: |
+          npm install
+          npm run build
+      
+      - name: Upload sourcemap to Sentry
+        uses: getsentry/action-release@v1
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+        with:
+          environment: production
+          version: ${{ github.sha }}
+          sourcemaps: './dist'
+          set_commits: skip
+          ignore_missing: true
+      
+      - name: Copy JavaScript to /public
+        run: |
+          cp ./dist/script.js ./public/script.js
+          cp ./dist/script.js.map ./public/script.js.map
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v1
         with:
-          # Upload entire repository
-          path: '.'
+          path: './public'
+      
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v1
